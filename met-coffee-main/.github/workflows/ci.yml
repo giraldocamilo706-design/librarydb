@@ -1,0 +1,120 @@
+name: CI
+
+# Controla cuándo se ejecutará la automatización
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      # Paso 1: Descarga el código de tu repositorio en el servidor de GitHub Actions
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      # Paso 2: Configura el entorno de Java (JDK) en el servidor virtual
+      - name: Configurar JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven # Esto acelera las descargas de dependencias en futuros cambios
+
+      - name: Compilar
+        run: mvn -B -DskipTests compile
+
+      - name: Iniciar MongoDB de pruebas
+        run: |
+          docker run -d \
+            --name metcoffee-mongodb-ci \
+            -p 27018:27017 \
+            --health-cmd 'mongosh --quiet --eval "db.adminCommand({ ping: 1 }).ok"' \
+            --health-interval 10s \
+            --health-timeout 5s \
+            --health-retries 10 \
+            mongo:7.0 \
+            mongod --replSet rs0 --bind_ip_all
+
+          for attempt in $(seq 1 30); do
+            health=$(docker inspect --format '{{.State.Health.Status}}' metcoffee-mongodb-ci)
+            if [ "$health" = "healthy" ]; then
+              exit 0
+            fi
+            if [ "$health" = "unhealthy" ]; then
+              docker logs metcoffee-mongodb-ci
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs metcoffee-mongodb-ci
+          exit 1
+
+      - name: Inicializar replica set MongoDB
+        run: |
+          docker exec metcoffee-mongodb-ci mongosh --quiet --eval '
+            try {
+              rs.initiate();
+            } catch (error) {
+              if (!error.message.includes("already initialized")) {
+                throw error;
+              }
+            }
+          '
+
+          for attempt in $(seq 1 30); do
+            state=$(docker exec metcoffee-mongodb-ci mongosh --quiet --eval 'try { rs.status().myState } catch (error) { 0 }' | tail -1)
+            if [ "$state" = "1" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs metcoffee-mongodb-ci
+          exit 1
+
+      - name: Ejecutar pruebas unitarias con Maven
+        run: mvn -B test
+
+      - name: Ejecutar pruebas de integración con Maven
+        env:
+          MONGODB_TEST_URI: mongodb://127.0.0.1:27018/metcoffee_test?replicaSet=rs0&directConnection=true
+        run: mvn -B -Pintegration verify
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: postman/package-lock.json
+
+      - name: Iniciar API para Newman
+        env:
+          MONGODB_TEST_URI: mongodb://127.0.0.1:27018/metcoffee_test?replicaSet=rs0&directConnection=true
+        run: |
+          nohup mvn -B spring-boot:run -Dspring-boot.run.profiles=test > /tmp/metcoffee-api.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/actuator/health > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/metcoffee-api.log
+          exit 1
+
+      - name: Ejecutar Newman
+        run: |
+          npm ci --prefix postman
+          npm run --prefix postman test:api:report -- --folder Cuenta
+
+      - name: Publicar reportes de Newman
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-reports
+          path: postman/reports/
+
+      - name: Detener MongoDB de pruebas
+        if: always()
+        run: docker rm --force metcoffee-mongodb-ci || true

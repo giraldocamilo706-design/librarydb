@@ -1,0 +1,149 @@
+{
+  "info": {
+    "name": "Met Coffee API",
+    "_postman_id": "met-coffee-api-tests",
+    "description": "Pruebas de API para una instancia local configurada con MongoDB de pruebas. No ejecutar contra Atlas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.info.requestName === 'Registrar usuario') {",
+          "  const suffix = Date.now().toString();",
+          "  pm.environment.set('usuarioPrueba', 'postman_' + suffix);",
+          "  pm.environment.set('correoPrueba', 'postman_' + suffix + '@test.local');",
+          "}",
+          "const clientToken = pm.environment.get('clienteToken');",
+          "const requestUrl = pm.request.url.toString();",
+          "if (clientToken && (/\\/api\\/(cuenta\\/[^/]+\\/fusionar-carrito|carrito|domicilios|compras|pedidos)/).test(requestUrl)) {",
+          "  pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + clientToken });",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('La respuesta tiene código HTTP', function () { pm.expect(pm.response.code).to.be.a('number'); });",
+          "if (pm.response.text()) { pm.test('El cuerpo JSON es válido cuando existe', function () { pm.response.json(); }); }"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" }
+  ],
+  "item": [
+    {
+      "name": "Cuenta",
+      "item": [
+        {
+          "name": "Registrar usuario",
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Registro creado', () => pm.expect(pm.response.code).to.eql(201));", "const body = pm.response.json(); if (body.id) pm.environment.set('usuarioId', body.id);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"nombreUsuario\": \"{{usuarioPrueba}}\",\n  \"correo\": \"{{correoPrueba}}\",\n  \"password\": \"{{passwordPrueba}}\",\n  \"telefono\": \"3001234567\"\n}" }, "url": "{{baseUrl}}/api/cuenta/registro" }
+        },
+        {
+          "name": "Iniciar sesión",
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Login correcto', () => pm.expect(pm.response.code).to.eql(200));", "const body = pm.response.json(); pm.expect(body.token).to.be.a('string'); pm.environment.set('clienteToken', body.token); if (body.usuario && body.usuario.id) pm.environment.set('usuarioId', body.usuario.id);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"correo\": \"{{correoPrueba}}\",\n  \"password\": \"{{passwordPrueba}}\"\n}" }, "url": "{{baseUrl}}/api/cuenta/login" }
+        },
+        {
+          "name": "Iniciar sesión administrador (requiere variables locales)",
+          "disabled": false,
+          "event": [{ "listen": "prerequest", "script": { "exec": ["if (!pm.environment.get('adminCorreo') || !pm.environment.get('adminPassword')) { pm.execution.skipRequest(); }"] } }, { "listen": "test", "script": { "exec": ["pm.test('Login administrativo correcto', () => pm.expect(pm.response.code).to.eql(200));", "const body = pm.response.json(); pm.expect(body.token).to.be.a('string'); pm.environment.set('adminToken', body.token);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"correo\": \"{{adminCorreo}}\",\n  \"password\": \"{{adminPassword}}\"\n}" }, "url": "{{baseUrl}}/api/cuenta/login" }
+        },
+        {
+          "name": "Fusionar carrito visitante",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"usuarioId\": \"visitante\",\n  \"items\": []\n}" }, "url": "{{baseUrl}}/api/cuenta/{{usuarioId}}/fusionar-carrito" }
+        }
+      ]
+    },
+    {
+      "name": "Catálogo",
+      "item": [
+        { "name": "Listar catálogo", "request": { "method": "GET", "url": "{{baseUrl}}/api/catalogo" } },
+        { "name": "Listar novedades", "request": { "method": "GET", "url": "{{baseUrl}}/api/catalogo/novedades" } },
+        { "name": "Consultar producto", "request": { "method": "GET", "url": "{{baseUrl}}/api/catalogo/{{productoId}}" } }
+      ]
+    },
+    {
+      "name": "Bolsa y carrito",
+      "item": [
+        {
+          "name": "Configurar bolsa",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"tamano\": \"250\",\n  \"compartimentos\": 2,\n  \"componentes\": [\n    { \"productoId\": \"{{productoId}}\", \"molienda\": \"Grano\" },\n    { \"productoId\": \"{{productoId}}\", \"molienda\": \"Molido\" }\n  ]\n}" }, "url": "{{baseUrl}}/api/bolsa/configurar" }
+        },
+        { "name": "Consultar carrito", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/carrito/{{usuarioId}}" } },
+        {
+          "name": "Agregar producto al carrito",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"productoId\": \"{{productoId}}\",\n  \"cantidad\": 1,\n  \"molienda\": \"Grano\",\n  \"gramos\": 125\n}" }, "url": "{{baseUrl}}/api/carrito/{{usuarioId}}/productos" }
+        },
+        {
+          "name": "Agregar bolsa al carrito",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"tamano\": \"250\",\n  \"compartimentos\": 2,\n  \"componentes\": [\n    { \"productoId\": \"{{productoId}}\", \"molienda\": \"Grano\" },\n    { \"productoId\": \"{{productoId}}\", \"molienda\": \"Molido\" }\n  ]\n}" }, "url": "{{baseUrl}}/api/carrito/{{usuarioId}}/bolsas" }
+        },
+        { "name": "Actualizar item", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"cantidad\": 2,\n  \"molienda\": \"Molido\",\n  \"gramos\": 125\n}" }, "url": "{{baseUrl}}/api/carrito/{{usuarioId}}/items/0" } },
+        { "name": "Eliminar item", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/carrito/{{usuarioId}}/items/0" } },
+        { "name": "Limpiar carrito", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/carrito/{{usuarioId}}" } }
+      ]
+    },
+    {
+      "name": "Domicilios y compras",
+      "item": [
+        { "name": "Listar domicilios", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/domicilios/{{usuarioId}}" } },
+        {
+          "name": "Crear domicilio",
+          "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json(); if (body.id) pm.environment.set('direccionId', body.id);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"etiqueta\": \"Casa\",\n  \"destinatario\": \"Usuario Postman\",\n  \"direccion\": \"Calle de pruebas 123\",\n  \"telefono\": \"3001234567\",\n  \"principal\": true\n}" }, "url": "{{baseUrl}}/api/domicilios/{{usuarioId}}" }
+        },
+        { "name": "Actualizar domicilio", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"etiqueta\": \"Casa actualizada\",\n  \"destinatario\": \"Usuario Postman\",\n  \"direccion\": \"Calle de pruebas 456\",\n  \"telefono\": \"3001234567\",\n  \"principal\": true\n}" }, "url": "{{baseUrl}}/api/domicilios/{{usuarioId}}/{{direccionId}}" } },
+        { "name": "Seleccionar domicilio principal", "request": { "method": "PUT", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/domicilios/{{usuarioId}}/{{direccionId}}/principal" } },
+        {
+          "name": "Confirmar compra",
+          "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json(); if (body.id) pm.environment.set('pedidoId', body.id);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }], "body": { "mode": "raw", "raw": "{\n  \"direccionId\": \"{{direccionId}}\"\n}" }, "url": "{{baseUrl}}/api/compras/{{usuarioId}}" }
+        }
+      ]
+    },
+    {
+      "name": "Pedidos",
+      "item": [
+        { "name": "Historial de pedidos", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/pedidos/{{usuarioId}}" } },
+        { "name": "Detalle de pedido", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/pedidos/{{usuarioId}}/{{pedidoId}}" } },
+        { "name": "Cancelar pedido", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/pedidos/{{usuarioId}}/{{pedidoId}}" } }
+      ]
+    },
+    {
+      "name": "Administración",
+      "item": [
+        { "name": "Listar productos admin", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/productos" } },
+        {
+          "name": "Crear producto admin",
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Producto creado', () => pm.expect(pm.response.code).to.eql(201));", "const body = pm.response.json(); if (body.id) pm.environment.set('productoId', body.id);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Cafe Postman\",\n  \"origen\": \"Colombia\",\n  \"perfil\": \"Chocolate\",\n  \"precioBase\": 28000,\n  \"stockGramos\": 5000,\n  \"novedad\": true,\n  \"activo\": true\n}" }, "url": "{{baseUrl}}/api/admin/productos" }
+        },
+        { "name": "Actualizar producto admin", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Cafe Postman actualizado\",\n  \"origen\": \"Colombia\",\n  \"perfil\": \"Chocolate y frutos rojos\",\n  \"precioBase\": 29000,\n  \"stockGramos\": 5000,\n  \"novedad\": true,\n  \"activo\": true\n}" }, "url": "{{baseUrl}}/api/admin/productos/{{productoId}}" } },
+        { "name": "Subir imagen admin", "request": { "method": "PUT", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "formdata", "formdata": [{ "key": "archivo", "type": "file", "src": "" }] }, "url": "{{baseUrl}}/api/admin/productos/{{productoId}}/imagen" } },
+        { "name": "Desactivar producto admin", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/productos/{{productoId}}" } },
+        { "name": "Listar pedidos admin", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/pedidos" } },
+        { "name": "Detalle pedido admin", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/pedidos/{{pedidoId}}" } },
+        { "name": "Actualizar estado pedido admin", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"estado\": \"ENVIADO\"\n}" }, "url": "{{baseUrl}}/api/admin/pedidos/{{pedidoId}}/estado" } },
+        { "name": "Consultar inventario", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/inventario/{{productoId}}" } },
+        { "name": "Ajustar inventario", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"stockGramos\": 5000,\n  \"nota\": \"Ajuste de pruebas\"\n}" }, "url": "{{baseUrl}}/api/admin/inventario/{{productoId}}" } },
+        { "name": "Movimientos de inventario", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/inventario/movimientos" } },
+        { "name": "Movimientos de producto", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/inventario/{{productoId}}/movimientos" } },
+        { "name": "Dashboard", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/dashboard?limiteBajoStock=500" } },
+        { "name": "Listar usuarios", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/usuarios" } },
+        { "name": "Consultar usuario", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/usuarios/{{usuarioId}}" } },
+        { "name": "Cambiar rol usuario", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"rol\": \"CLIENTE\"\n}" }, "url": "{{baseUrl}}/api/admin/usuarios/{{usuarioId}}/rol" } },
+        { "name": "Eliminar usuario", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/api/admin/usuarios/{{usuarioId}}" } }
+      ]
+    }
+  ]
+}
